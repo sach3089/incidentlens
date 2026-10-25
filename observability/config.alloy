@@ -1,9 +1,24 @@
-loki.source.file "application" {
-  targets = [
+// Discover periodically: application files may not exist when Alloy starts.
+local.file_match "application" {
+  path_targets = [
     {__path__ = "/logs/order.json", service = "order-service"},
     {__path__ = "/logs/inventory.json", service = "inventory-service"},
     {__path__ = "/logs/incident.json", service = "incidentlens"},
   ]
+  sync_period = "5s"
+}
+loki.source.file "application" {
+  targets = local.file_match.application.targets
+  forward_to = [loki.process.application.receiver]
+}
+loki.process "application" {
+  stage.json {
+    expressions = { timestamp = "\"@timestamp\"" }
+  }
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339Nano"
+  }
   forward_to = [loki.write.local.receiver]
 }
 loki.write "local" {

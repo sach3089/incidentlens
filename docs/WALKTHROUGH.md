@@ -49,3 +49,5 @@ Use the fault endpoint with `delayMs: 1500, fail: false` and generate traffic. Y
 - Check the application agent reports service.name and an OTLP endpoint at startup.
 - Check Alloy can read /logs and the Collector can reach Tempo.
 - Allow at least two Prometheus scrapes before rates can be computed; use a longer traffic window for useful baselines.
+
+Alloy periodically discovers files because the apps may start later than the collector. It parses @timestamp so Loki queries use application event time rather than log-shipping time.

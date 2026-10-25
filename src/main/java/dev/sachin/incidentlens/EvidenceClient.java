@@ -72,10 +72,14 @@ class EvidenceClient {
             List<Map<String,String>> traces=new ArrayList<>();
             for(JsonNode t:root.path("traces")) {
                 if(traces.size()==10)break;
-                traces.add(Map.of("traceId",t.path("traceID").asText(),"rootService",t.path("rootServiceName").asText(),"durationMs",t.path("durationMs").asText()));
+                traces.add(Map.of("traceId",normalizeTraceId(t.path("traceID").asText()),"rootService",t.path("rootServiceName").asText(),"durationMs",t.path("durationMs").asText()));
             }
             return new SourceEvidence("tempo",traces.isEmpty()?"EMPTY":"OK",traces,"At most 10 traces. A matching error span can belong to any operation in the trace; inspect it before attributing cause. Retention, export delays and sampling can leave gaps.",query);
         } catch(Exception ex) { return unavailable("tempo",query); }
+    }
+    private String normalizeTraceId(String id) {
+        // Tempo may omit leading zeroes in hexadecimal search results.
+        return id.matches("[0-9a-fA-F]{1,32}") ? "0".repeat(32-id.length())+id.toLowerCase(java.util.Locale.ROOT) : id;
     }
     private SourceEvidence unavailable(String source,String query){return new SourceEvidence(source,"UNAVAILABLE",Map.of(),"Query failed or exceeded configured bounds. No conclusion is drawn from this missing source.",query);}
     private String safe(String s){return s.substring(0,Math.min(s.length(),400)).replaceAll("(?i)(password|token|secret)=[^\\s]+","$1=[REDACTED]").replaceAll("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}","[EMAIL]");}
