@@ -1,0 +1,164 @@
+openapi: 3.0.3
+info:
+  title: IncidentLens Evidence API
+  version: 0.1.0
+  description: Local synthetic observability lab. Investigation creation is synchronous and bounded.
+servers:
+  - url: http://localhost:8080
+security:
+  - basicAuth: []
+paths:
+  /api/v1/investigations:
+    post:
+      summary: Collect and persist an evidence snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestigationRequest'
+      responses:
+        '201':
+          description: Persisted report (COMPLETE or PARTIAL); Location header points to report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+        '400': {description: Invalid input or time window}
+        '401': {description: Authentication required}
+        '429': {description: Investigation capacity reached}
+  /api/v1/investigations/{id}:
+    get:
+      summary: Retrieve a saved report
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Saved report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+        '401': {description: Authentication required}
+        '404': {description: Unknown report}
+  /api/v1/investigations/{id}/evidence:
+    get:
+      summary: Retrieve source evidence from a saved report
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: Evidence snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceEvidence'
+        '401': {description: Authentication required}
+        '404': {description: Unknown report}
+  /api/v1/investigations/{id}/timeline:
+    get:
+      summary: Retrieve nearby deployment events, sorted by timestamp
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: At most 50 user-supplied deployment events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deployment'
+        '401': {description: Authentication required}
+        '404': {description: Unknown report}
+  /api/v1/deployment-events:
+    post:
+      summary: Record a synthetic or manually supplied change marker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentInput'
+      responses:
+        '201':
+          description: Event saved; this endpoint does not deploy software
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        '400': {description: Invalid input or future event}
+        '401': {description: Authentication required}
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+  schemas:
+    InvestigationRequest:
+      type: object
+      required: [service, environment, from, to]
+      properties:
+        service: {type: string, enum: [order-service, inventory-service]}
+        environment: {type: string, enum: [local]}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+      description: Window must be 60–1800 seconds. End may be at most 15 seconds ahead of server time.
+    SourceEvidence:
+      type: object
+      properties:
+        source: {type: string, enum: [prometheus, loki, tempo]}
+        status: {type: string, enum: [OK, EMPTY, UNAVAILABLE]}
+        data: {description: Bounded source-specific metric object or list of log/trace records}
+        limitation: {type: string}
+        query: {type: string}
+    DeploymentInput:
+      type: object
+      required: [service, version, occurredAt, description]
+      properties:
+        service: {type: string, enum: [order-service, inventory-service]}
+        version: {type: string, minLength: 1, maxLength: 80}
+        occurredAt: {type: string, format: date-time}
+        description: {type: string, minLength: 1, maxLength: 200}
+    Deployment:
+      allOf:
+        - $ref: '#/components/schemas/DeploymentInput'
+        - type: object
+          properties:
+            id: {type: string}
+    Report:
+      type: object
+      properties:
+        id: {type: string}
+        service: {type: string}
+        environment: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        status: {type: string, enum: [COMPLETE, PARTIAL]}
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceEvidence'
+        deployments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              type: {type: string, enum: [OBSERVATION, HYPOTHESIS, COVERAGE_GAP]}
+              statement: {type: string}
+              evidenceSources: {type: array, items: {type: string}}
+        grafanaUrl: {type: string, format: uri}
+        limitations: {type: array, items: {type: string}}

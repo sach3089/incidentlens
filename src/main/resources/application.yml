@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: ${SERVICE_NAME:incidentlens}
+  datasource:
+    url: ${DB_URL:jdbc:h2:mem:incidentlens;DB_CLOSE_DELAY=-1}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
+  sql:
+    init:
+      mode: always
+  security:
+    user:
+      name: ${API_USER:analyst}
+      password: ${API_PASSWORD:local-change-me}
+app:
+  mode: ${APP_MODE:incident}
+  demo-key: ${DEMO_KEY:local-demo-only}
+  inventory-url: ${INVENTORY_URL:http://localhost:8082}
+  prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
+  loki-url: ${LOKI_URL:http://localhost:3100}
+  tempo-url: ${TEMPO_URL:http://localhost:3200}
+  grafana-url: ${GRAFANA_URL:http://localhost:3000}
+server:
+  port: ${PORT:8080}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+logging:
+  file:
+    name: ${LOG_FILE:./logs/application.json}
+  structured:
+    format:
+      console: logstash
+      file: logstash
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 2
+      total-size-cap: 30MB

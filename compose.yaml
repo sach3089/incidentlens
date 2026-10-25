@@ -1,0 +1,114 @@
+name: incidentlens
+x-app: &app
+  image: incidentlens:local
+  build: .
+  restart: unless-stopped
+  volumes:
+    - application-logs:/logs
+  environment: &telemetry
+    JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar -XX:MaxRAMPercentage=65
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_METRICS_EXPORTER: none
+    OTEL_LOGS_EXPORTER: none
+    OTEL_TRACES_SAMPLER: always_on
+    OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local,service.version=demo-v1
+    API_PASSWORD: ${INCIDENTLENS_PASSWORD:?Copy .env.example to .env first}
+  mem_limit: 512m
+services:
+  inventory:
+    <<: *app
+    ports: ['127.0.0.1:8082:8080']
+    environment:
+      <<: *telemetry
+      APP_MODE: inventory
+      SERVICE_NAME: inventory-service
+      OTEL_SERVICE_NAME: inventory-service
+      LOG_FILE: /logs/inventory.json
+      DEMO_KEY: ${DEMO_KEY:?Set DEMO_KEY}
+  order:
+    <<: *app
+    ports: ['127.0.0.1:8081:8080']
+    environment:
+      <<: *telemetry
+      APP_MODE: order
+      SERVICE_NAME: order-service
+      OTEL_SERVICE_NAME: order-service
+      INVENTORY_URL: http://inventory:8080
+      LOG_FILE: /logs/order.json
+    depends_on: [inventory]
+  incidentlens:
+    <<: *app
+    ports: ['127.0.0.1:8080:8080']
+    environment:
+      <<: *telemetry
+      APP_MODE: incident
+      SERVICE_NAME: incidentlens
+      OTEL_SERVICE_NAME: incidentlens
+      LOG_FILE: /logs/incident.json
+      DB_URL: jdbc:postgresql://postgres:5432/incidentlens
+      DB_USER: incidentlens
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: incidentlens
+      POSTGRES_DB: incidentlens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U incidentlens -d incidentlens']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.retention.time=2h']
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ['127.0.0.1:9090:9090']
+  loki:
+    image: grafana/loki:3.5.3
+    command: ['-config.file=/etc/loki/local.yaml']
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/local.yaml:ro
+    ports: ['127.0.0.1:3100:3100']
+  tempo:
+    image: grafana/tempo:2.8.2
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo.yaml:ro
+    ports: ['127.0.0.1:3200:3200']
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.132.0
+    command: ['--config=/etc/otel.yaml']
+    volumes:
+      - ./observability/otel.yaml:/etc/otel.yaml:ro
+    depends_on: [tempo]
+  alloy:
+    image: grafana/alloy:v1.10.2
+    command: ['run', '/etc/alloy/config.alloy', '--storage.path=/tmp/alloy']
+    volumes:
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - application-logs:/logs:ro
+    depends_on: [loki]
+  grafana:
+    image: grafana/grafana:12.1.1
+    ports: ['127.0.0.1:3000:3000']
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki, tempo]
+volumes:
+  database:
+  application-logs:

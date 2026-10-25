@@ -1,0 +1,13 @@
+loki.source.file "application" {
+  targets = [
+    {__path__ = "/logs/order.json", service = "order-service"},
+    {__path__ = "/logs/inventory.json", service = "inventory-service"},
+    {__path__ = "/logs/incident.json", service = "incidentlens"},
+  ]
+  forward_to = [loki.write.local.receiver]
+}
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

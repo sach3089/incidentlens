@@ -1,0 +1,68 @@
+name: Optional AWS deployment (chargeable, manual only)
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledgement:
+        description: Type DEPLOY_CHARGEABLE_AWS_RESOURCES after reading docs/AWS.md
+        required: true
+        default: NOT_CONFIGURED
+permissions:
+  contents: read
+jobs:
+  deploy:
+    if: inputs.acknowledgement == 'DEPLOY_CHARGEABLE_AWS_RESOURCES'
+    environment: aws-demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pre-provisioned deployment settings
+        env:
+          REGION: ${{ vars.AWS_REGION }}
+          ROLE: ${{ vars.AWS_ROLE_ARN }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          TASK: ${{ vars.ECS_TASK_FAMILY }}
+        run: |
+          test -n "$REGION" && test -n "$ROLE" && test -n "$REPOSITORY"
+          test -n "$CLUSTER" && test -n "$SERVICE" && test -n "$TASK"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - run: mvn -B verify
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push immutable image tag
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+        run: |
+          IMAGE="$REGISTRY/$REPOSITORY:$GITHUB_SHA"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Fetch existing configured task definition
+        run: aws ecs describe-task-definition --task-definition '${{ vars.ECS_TASK_FAMILY }}' --query taskDefinition > task-definition.json
+      - id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: app
+          image: ${{ steps.image.outputs.image }}
+      - uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ vars.ECS_SERVICE }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          wait-for-service-stability: true
